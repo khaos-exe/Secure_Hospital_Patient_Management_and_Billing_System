@@ -1,0 +1,4 @@
+.env
+__pycache__/
+.encryption_iv
+.encryption_key

@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block title %}Patient Intake Form - Secure Hospital System{% endblock %}
+
+{% block content %}
+<h1>Patient Intake Form</h1>
+<p class="subtitle">Secure Hospital Patient Management System</p>
+
+<form method="POST" action="/">
+    <div class="form-group">
+        <label for="full_name">Full Name <span class="required">*</span></label>
+        <input type="text" id="full_name" name="full_name" required>
+    </div>
+    
+    <div class="form-group">
+        <label for="dob">Date of Birth <span class="required">*</span></label>
+        <input type="date" id="dob" name="dob" required>
+    </div>
+    
+    <div class="form-group">
+        <label for="email">Email Address <span class="required">*</span></label>
+        <input type="email" id="email" name="email" required>
+    </div>
+    
+    <div class="form-group">
+        <label for="phone">Phone Number</label>
+        <input type="tel" id="phone" name="phone">
+    </div>
+    
+    <div class="form-group">
+        <label for="address">Address</label>
+        <textarea id="address" name="address"></textarea>
+    </div>
+    
+    <div class="form-group">
+        <label for="mrn">Medical Record Number (MRN) <span class="required">*</span></label>
+        <input type="text" id="mrn" name="mrn" required>
+    </div>
+    
+    <div class="form-group">
+        <label for="diagnosis">Diagnosis</label>
+        <textarea id="diagnosis" name="diagnosis"></textarea>
+    </div>
+    
+    <div class="form-group">
+        <label for="insurance">Insurance Policy Number</label>
+        <input type="text" id="insurance" name="insurance">
+    </div>
+    
+    <div class="form-group">
+        <label for="amount">Billing Amount <span class="required">*</span></label>
+        <input type="number" id="amount" name="amount" step="0.01" min="0" required>
+    </div>
+    
+    <div class="form-group">
+        <label for="card">Payment Card Number <span class="required">*</span></label>
+        <input type="text" id="card" name="card" required>
+    </div>
+    
+    <button type="submit" class="submit-btn">Submit Patient Information</button>
+</form>
+{% endblock %}
+

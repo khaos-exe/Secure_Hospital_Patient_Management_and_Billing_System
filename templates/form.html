@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block title %}{{ form_title }} - Secure Hospital System{% endblock %}
+
+{% block content %}
+<a href="/" class="back-link">← Back to Home</a>
+<h1>{{ form_title }}</h1>
+<p class="subtitle">{{ form_subtitle }}</p>
+
+<form method="POST" action="{{ form_action }}">
+    {% for field in form_fields %}
+    <div class="form-group {% if field.row %}form-row{% endif %}">
+        {% if field.type == 'textarea' %}
+        <label for="{{ field.name }}">{{ field.label }}{% if field.required %} <span class="required">*</span>{% endif %}</label>
+        <textarea id="{{ field.name }}" name="{{ field.name }}" {% if field.required %}required{% endif %} placeholder="{{ field.placeholder }}"></textarea>
+        {% elif field.type == 'select' %}
+        <label for="{{ field.name }}">{{ field.label }}{% if field.required %} <span class="required">*</span>{% endif %}</label>
+        <select id="{{ field.name }}" name="{{ field.name }}" {% if field.required %}required{% endif %}>
+            {% if field.placeholder %}<option value="">{{ field.placeholder }}</option>{% endif %}
+            {% for option in field.options %}
+            <option value="{{ option.value }}" {% if option.selected %}selected{% endif %}>{{ option.label }}</option>
+            {% endfor %}
+        </select>
+        {% else %}
+        <label for="{{ field.name }}">{{ field.label }}{% if field.required %} <span class="required">*</span>{% endif %}</label>
+        <input type="{{ field.type }}" id="{{ field.name }}" name="{{ field.name }}" 
+               {% if field.required %}required{% endif %} 
+               {% if field.placeholder %}placeholder="{{ field.placeholder }}"{% endif %}
+               {% if field.step %}step="{{ field.step }}"{% endif %}
+               {% if field.min %}min="{{ field.min }}"{% endif %}>
+        {% endif %}
+    </div>
+    {% endfor %}
+    
+    <button type="submit" class="submit-btn">{{ submit_button_text }}</button>
+</form>
+{% endblock %}
+

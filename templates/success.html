@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+
+{% block title %}Success - Secure Hospital System{% endblock %}
+
+{% block content %}
+<div class="success-icon">✓</div>
+<h1>Success!</h1>
+<p>{{ success_message|default("Your information has been successfully submitted and securely stored in the system.") }}</p>
+<p>All sensitive data has been encrypted according to security protocols.</p>
+<a href="/" class="btn">Back to Home</a>
+{% endblock %}

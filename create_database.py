@@ -1,5 +1,9 @@
 import os
 import mysql.connector
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # --------------------------------------------------------
 # Load credentials from environment variables
@@ -68,14 +72,12 @@ CREATE INDEX idx_person_dob ON persons(date_of_birth);
 CREATE TABLE IF NOT EXISTS government_ids (
     gov_id              INT AUTO_INCREMENT PRIMARY KEY,
     person_id           INT NOT NULL,
-
-    ssn_enc             BLOB,
-    drivers_license_enc BLOB,
-    passport_enc        BLOB,
-    state_id_enc        BLOB,
-    vehicle_reg_enc     BLOB,
-
-    iv                  BLOB NOT NULL,
+    ssn_enc             VARBINARY(255),
+    drivers_license_enc VARBINARY(255),
+    passport_enc        VARBINARY(255),
+    state_id_enc        VARBINARY(255),
+    
+    iv            BLOB NOT NULL,
     created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
     FOREIGN KEY (person_id) REFERENCES persons(person_id)
@@ -91,10 +93,9 @@ CREATE TABLE IF NOT EXISTS contact_info (
     contact_id    INT AUTO_INCREMENT PRIMARY KEY,
     person_id     INT NOT NULL,
 
-    address_enc   BLOB,
+    address_enc   VARBINARY,
     email         VARCHAR(255) NOT NULL,
-    phone_enc     BLOB,
-    ip_address    VARCHAR(100),
+    phone_enc     VARBINARY,
 
     iv            BLOB NOT NULL,
     created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -113,11 +114,11 @@ CREATE TABLE IF NOT EXISTS financial_accounts (
     fin_id                INT AUTO_INCREMENT PRIMARY KEY,
     person_id             INT NOT NULL,
 
-    card_number_enc       BLOB,
+    card_number_enc       VARBINARY,
     card_last4            VARCHAR(4),
-    bank_account_enc      BLOB,
-    routing_number_enc    BLOB,
-    insurance_account_enc BLOB,
+    bank_account_enc      VARBINARY,
+    routing_number_enc    VARBINARY,
+    insurance_account_enc VARBINARY,
 
     iv                    BLOB NOT NULL,
     created_at            TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -135,8 +136,8 @@ CREATE TABLE IF NOT EXISTS health_genetic_info (
     health_id             INT AUTO_INCREMENT PRIMARY KEY,
     person_id             INT NOT NULL,
 
-    medical_record_id_enc BLOB,
-    genetic_data_enc      BLOB,
+    medical_record_id_enc VARBINARY,
+    genetic_data_enc      VARBINARY,
 
     iv                    BLOB NOT NULL,
     created_at            TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
