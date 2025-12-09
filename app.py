@@ -208,21 +208,37 @@ def patient_form():
             card = request.form.get("card", "").strip()
             amount = request.form.get("amount", "").strip()
 
+            # Prepare form data dictionary for re-rendering on errors
+            form_data = {
+                "full_name": full_name,
+                "dob": dob,
+                "email": email,
+                "phone": phone,
+                "address": address,
+                "mrn": mrn,
+                "diagnosis": diagnosis,
+                "insurance": insurance,
+                "card": card,
+                "amount": amount
+            }
+
             # Basic server-side validation
             if len(full_name) < 2 or not dob or not EMAIL_REGEX.match(email) or len(mrn) < 3:
                 flash("Please provide valid required fields.", "error")
-                return render_template("patient_form.html"), 400
+                return render_template("patient_form.html", form_data=form_data), 400
             sanitized_phone = re.sub(r"\D", "", phone)
             if phone and len(sanitized_phone) < 7:
                 flash("Phone number must be at least 7 digits.", "error")
-                return render_template("patient_form.html"), 400
+                form_data["phone"] = phone  # Keep original phone value
+                return render_template("patient_form.html", form_data=form_data), 400
             phone = sanitized_phone
 
             try:
                 card_number = sanitize_card_number(card)
             except ValueError as ve:
                 flash(str(ve), "error")
-                return render_template("patient_form.html"), 400
+                form_data["card"] = card  # Keep original card value
+                return render_template("patient_form.html", form_data=form_data), 400
 
             try:
                 amount_value = Decimal(amount).quantize(Decimal("0.01"))
@@ -230,7 +246,8 @@ def patient_form():
                     raise InvalidOperation
             except (InvalidOperation, ValueError):
                 flash("Billing amount must be a positive number.", "error")
-                return render_template("patient_form.html"), 400
+                form_data["amount"] = amount  # Keep original amount value
+                return render_template("patient_form.html", form_data=form_data), 400
 
             # Split full_name into first_name and last_name
             name_parts = full_name.split(maxsplit=1)
@@ -278,14 +295,18 @@ def patient_form():
             )
             billing_id = cur.lastrowid
 
-            # 4) Store encrypted card data in Payment table
+            # 4) Store payment method in Payment_Methods table (for saved payment methods)
+            # Extract last 4 digits safely (for display/reference purposes)
+            card_last4 = card_number[-4:] if len(card_number) >= 4 else card_number
+            # Encrypt the full card number for secure storage
             encrypted_card = encrypt_data(card_number)
+            # Insert into Payment_Methods - this allows the patient to use this card for future payments
             cur.execute(
                 """
-                INSERT INTO Payment (billing_id, payment_amount, payment_date, payment_method, transaction_id)
-                VALUES (%s, %s, NOW(), %s, %s)
+                INSERT INTO Payment_Methods (patient_id, type, last4, data_enc, is_default)
+                VALUES (%s, %s, %s, %s, %s)
                 """,
-                (billing_id, amount_value, encrypted_card, encrypt_data("")),
+                (patient_id, 'CARD', card_last4, encrypted_card, True),
             )
 
             # 5) Store masked identifiers (last4, MRN, address) in a dedicated table
@@ -294,7 +315,7 @@ def patient_form():
                 INSERT INTO Patient_Sensitive (patient_id, mrn, home_address, insurance_policy, card_last4)
                 VALUES (%s, %s, %s, %s, %s)
                 """,
-                (patient_id, encrypted_mrn, encrypted_address, encrypted_insurance, card_number[-4:]),
+                (patient_id, encrypted_mrn, encrypted_address, encrypted_insurance, card_last4),
             )
 
             conn.commit()
@@ -307,11 +328,27 @@ def patient_form():
 
         except Exception as e:
             # Helpful for debugging & assignment explanation
+            error_msg = str(e)
             print("ERROR IN POST /patient:", repr(e))
+            app.logger.error(f"Database error in patient_form: {error_msg}", exc_info=True)
             if conn:
                 conn.rollback()
-            flash("Error while saving to DB.", "error")
-            return render_template("patient_form.html"), 500
+            # Reconstruct form_data from request for error display
+            form_data = {
+                "full_name": request.form.get("full_name", "").strip(),
+                "dob": request.form.get("dob", "").strip(),
+                "email": request.form.get("email", "").strip(),
+                "phone": request.form.get("phone", "").strip(),
+                "address": request.form.get("address", "").strip(),
+                "mrn": request.form.get("mrn", "").strip(),
+                "diagnosis": request.form.get("diagnosis", "").strip(),
+                "insurance": request.form.get("insurance", "").strip(),
+                "card": request.form.get("card", "").strip(),
+                "amount": request.form.get("amount", "").strip()
+            }
+            # Show more specific error message to help debug
+            flash(f"Error while saving to DB: {error_msg}", "error")
+            return render_template("patient_form.html", form_data=form_data), 500
         finally:
             if cur:
                 cur.close()
@@ -319,7 +356,7 @@ def patient_form():
                 conn.close()
 
     # GET: show the secure intake form
-    return render_template("patient_form.html")
+    return render_template("patient_form.html", form_data={})
 
 
 @app.route("/patient/<int:patient_id>")
@@ -695,11 +732,43 @@ def payment_form():
             encrypted_method = encrypt_data(request.form.get("payment_method", ""))
             encrypted_transaction = encrypt_data(request.form.get("transaction_id", ""))
             
+            # Get patient_id from billing_id
+            cur.execute("SELECT patient_id FROM Billing WHERE billing_id = %s", (request.form.get("billing_id"),))
+            billing_row = cur.fetchone()
+            if not billing_row:
+                flash("Billing ID not found.", "error")
+                return render_template("form.html",
+                    form_title="Payment Processing",
+                    form_subtitle="Process a payment for a billing record",
+                    form_action="/payment",
+                    submit_button_text="Process Payment",
+                    form_fields=[
+                        {'name': 'billing_id', 'label': 'Billing ID', 'type': 'text', 'required': True, 'placeholder': 'Enter Billing ID'},
+                        {'name': 'payment_amount', 'label': 'Payment Amount ($)', 'type': 'number', 'required': True, 'step': '0.01', 'min': '0', 'placeholder': '0.00'},
+                        {'name': 'payment_date', 'label': 'Payment Date', 'type': 'datetime-local', 'required': True},
+                        {'name': 'payment_method', 'label': 'Payment Method', 'type': 'text', 'required': True, 'placeholder': 'e.g., Credit Card, Debit Card, Cash'},
+                        {'name': 'transaction_id', 'label': 'Transaction ID', 'type': 'text', 'required': True, 'placeholder': 'Enter transaction ID'}
+                    ]), 400
+            
+            patient_id = billing_row[0]
+            
+            # Try to find a matching Payment_Methods record for this patient (optional)
+            payment_method_id = None
+            cur.execute("SELECT payment_method_id FROM Payment_Methods WHERE patient_id = %s AND is_default = TRUE LIMIT 1", (patient_id,))
+            pm_row = cur.fetchone()
+            if pm_row:
+                payment_method_id = pm_row[0]
+            
+            # Store transaction info in note field (transaction_id is encrypted, store method name for reference)
+            payment_method_name = request.form.get('payment_method', '')
+            transaction_note = f"Payment Method: {payment_method_name}; Transaction ID: [encrypted]"
+            
+            # Use Payment_Transactions instead of Payment
             cur.execute(
-                """INSERT INTO Payment (billing_id, payment_amount, payment_date, payment_method, transaction_id)
-                   VALUES (%s, %s, %s, %s, %s)""",
-                (request.form.get("billing_id"), request.form.get("payment_amount"),
-                 request.form.get("payment_date"), encrypted_method, encrypted_transaction)
+                """INSERT INTO Payment_Transactions (billing_id, patient_id, payment_method_id, amount, paid_at, status, note)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                (request.form.get("billing_id"), patient_id, payment_method_id, request.form.get("payment_amount"),
+                 request.form.get("payment_date"), 'Posted', transaction_note)
             )
             conn.commit()
             return redirect(url_for("success", message="Payment processed successfully!"))

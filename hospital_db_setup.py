@@ -126,21 +126,6 @@ def create_database_and_tables():
     safe_create_index("CREATE INDEX idx_billing_patient ON Billing(patient_id);")
     safe_create_index("CREATE INDEX idx_billing_status ON Billing(status);")
 
-    # Store individual payments linked to billing
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS Payment (
-        payment_id INT AUTO_INCREMENT PRIMARY KEY,
-        billing_id INT NOT NULL,
-        payment_amount DECIMAL(10, 2) NOT NULL,
-        payment_date DATETIME,
-        payment_method BLOB,
-        transaction_id BLOB,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (billing_id) REFERENCES Billing(billing_id)
-    );
-    """)
-    safe_create_index("CREATE INDEX idx_payment_billing ON Payment(billing_id);")
-    
     # Create the Payment_Methods table (store encrypted method data)
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS Payment_Methods (
