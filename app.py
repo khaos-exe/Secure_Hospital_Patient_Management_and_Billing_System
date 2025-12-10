@@ -280,7 +280,16 @@ def logout():
 
 
 @app.route("/patient", methods=["GET", "POST"])
+@require_login
 def patient_form():
+    """Patient registration - accessible to staff/admin only"""
+    user_role = get_current_user_role()
+    
+    # Only staff and admin can register patients
+    # (Patients register themselves through a different flow if needed)
+    if user_role not in ['staff', 'admin']:
+        flash("Only staff and administrators can register new patients.", "error")
+        return redirect(url_for("dashboard"))
     if request.method == "POST":
         conn = cur = None
         try:
@@ -293,8 +302,6 @@ def patient_form():
             mrn = request.form.get("mrn", "").strip()
             diagnosis = request.form.get("diagnosis", "").strip()
             insurance = request.form.get("insurance", "").strip()
-            card = request.form.get("card", "").strip()
-            amount = request.form.get("amount", "").strip()
 
             # Prepare form data dictionary for re-rendering on errors
             form_data = {
@@ -305,14 +312,23 @@ def patient_form():
                 "address": address,
                 "mrn": mrn,
                 "diagnosis": diagnosis,
-                "insurance": insurance,
-                "card": card,
-                "amount": amount
+                "insurance": insurance
             }
 
             # Basic server-side validation
-            if len(full_name) < 2 or not dob or not EMAIL_REGEX.match(email) or len(mrn) < 3:
-                flash("Please provide valid required fields.", "error")
+            validation_errors = []
+            if len(full_name) < 2:
+                validation_errors.append("Full name must be at least 2 characters.")
+            if not dob:
+                validation_errors.append("Date of birth is required.")
+            if not EMAIL_REGEX.match(email):
+                validation_errors.append("A valid email address is required.")
+            if len(mrn) < 3:
+                validation_errors.append("Medical Record Number (MRN) must be at least 3 characters.")
+            
+            if validation_errors:
+                for error in validation_errors:
+                    flash(error, "error")
                 return render_template("patient_form.html", form_data=form_data), 400
             sanitized_phone = re.sub(r"\D", "", phone)
             if phone and len(sanitized_phone) < 7:
@@ -320,22 +336,6 @@ def patient_form():
                 form_data["phone"] = phone  # Keep original phone value
                 return render_template("patient_form.html", form_data=form_data), 400
             phone = sanitized_phone
-
-            try:
-                card_number = sanitize_card_number(card)
-            except ValueError as ve:
-                flash(str(ve), "error")
-                form_data["card"] = card  # Keep original card value
-                return render_template("patient_form.html", form_data=form_data), 400
-
-            try:
-                amount_value = Decimal(amount).quantize(Decimal("0.01"))
-                if amount_value < 0:
-                    raise InvalidOperation
-            except (InvalidOperation, ValueError):
-                flash("Billing amount must be a positive number.", "error")
-                form_data["amount"] = amount  # Keep original amount value
-                return render_template("patient_form.html", form_data=form_data), 400
 
             # Split full_name into first_name and last_name
             name_parts = full_name.split(maxsplit=1)
@@ -373,49 +373,33 @@ def patient_form():
                 (patient_id, None, encrypted_diagnosis, encrypt_data("")),
             )
 
-            # 3) Store billing info in Billing table
-            cur.execute(
-                """
-                INSERT INTO Billing (patient_id, total_amount, status)
-                VALUES (%s, %s, %s)
-                """,
-                (patient_id, amount_value, "Pending"),
-            )
-            billing_id = cur.lastrowid
-
-            # 4) Store payment method in Payment_Methods table (for saved payment methods)
-            # Extract last 4 digits safely (for display/reference purposes)
-            card_last4 = card_number[-4:] if len(card_number) >= 4 else card_number
-            # Encrypt the full card number for secure storage
-            encrypted_card = encrypt_data(card_number)
-            # Insert into Payment_Methods - this allows the patient to use this card for future payments
-            cur.execute(
-                """
-                INSERT INTO Payment_Methods (patient_id, type, last4, data_enc, is_default)
-                VALUES (%s, %s, %s, %s, %s)
-                """,
-                (patient_id, 'CARD', card_last4, encrypted_card, True),
-            )
-
-            # 5) Store masked identifiers (last4, MRN, address) in a dedicated table
+            # 3) Store masked identifiers (MRN, address) in a dedicated table
             cur.execute(
                 """
                 INSERT INTO Patient_Sensitive (patient_id, mrn, home_address, insurance_policy, card_last4)
                 VALUES (%s, %s, %s, %s, %s)
                 """,
-                (patient_id, encrypted_mrn, encrypted_address, encrypted_insurance, card_last4),
+                (patient_id, encrypted_mrn, encrypted_address, encrypted_insurance, None),
             )
 
             conn.commit()
-            # Auto-login after registration
-            session['logged_in'] = True
-            session['user_id'] = patient_id
-            session['user_role'] = 'patient'
-            session['patient_id'] = patient_id  # Backward compatibility
-            session['user_name'] = f"{first_name} {last_name}"
             
-            # Redirect to the nice success page
-            return redirect(url_for("success"))
+            # Only auto-login if registering as a patient (not when staff registers)
+            # Staff/admin registering patients should not be auto-logged in as that patient
+            user_role = get_current_user_role()
+            if user_role == 'patient' or not session.get('logged_in'):
+                # This is a self-registration, auto-login
+                session['logged_in'] = True
+                session['user_id'] = patient_id
+                session['user_role'] = 'patient'
+                session['patient_id'] = patient_id  # Backward compatibility
+                session['user_name'] = f"{first_name} {last_name}"
+                flash(f"Patient registered successfully! Patient ID: {patient_id}", "success")
+                return redirect(url_for("success"))
+            else:
+                # Staff/admin registered a patient, don't auto-login
+                flash(f"Patient registered successfully! Patient ID: {patient_id}", "success")
+                return redirect(url_for("list_patients"))
 
         except Exception as e:
             # Helpful for debugging & assignment explanation
@@ -433,9 +417,7 @@ def patient_form():
                 "address": request.form.get("address", "").strip(),
                 "mrn": request.form.get("mrn", "").strip(),
                 "diagnosis": request.form.get("diagnosis", "").strip(),
-                "insurance": request.form.get("insurance", "").strip(),
-                "card": request.form.get("card", "").strip(),
-                "amount": request.form.get("amount", "").strip()
+                "insurance": request.form.get("insurance", "").strip()
             }
             # Show more specific error message to help debug
             flash(f"Error while saving to DB: {error_msg}", "error")
@@ -534,7 +516,7 @@ def patient_edit(patient_id: int):
 
 
 @app.route("/staff", methods=["GET", "POST"])
-@require_role('staff', 'admin')
+@require_role('admin')
 def staff_form():
     template_kwargs = dict(
         form_title="Staff Registration",
@@ -831,8 +813,84 @@ def view_my_bills():
             conn.close()
 
 
-@app.route("/billing", methods=["GET", "POST"])
+@app.route("/patients")
 @require_role('staff', 'admin')
+def list_patients():
+    """List all patients for staff/admin to search and view"""
+    conn = cur = None
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor(dictionary=True)
+        
+        # Get search query if provided
+        search_query = request.args.get('search', '').strip()
+        
+        if search_query:
+            # Search by name or patient ID (can't search encrypted email directly)
+            # Try to match patient ID first (numeric)
+            try:
+                patient_id_search = int(search_query)
+                cur.execute("""
+                    SELECT p.patient_id, p.first_name, p.last_name, 
+                           p.email, p.phone_number, p.dob
+                    FROM Patient p
+                    WHERE p.patient_id = %s
+                    ORDER BY p.patient_id DESC
+                    LIMIT 50
+                """, (patient_id_search,))
+            except ValueError:
+                # Not a number, search by name
+                cur.execute("""
+                    SELECT p.patient_id, p.first_name, p.last_name, 
+                           p.email, p.phone_number, p.dob
+                    FROM Patient p
+                    WHERE p.first_name LIKE %s 
+                       OR p.last_name LIKE %s
+                       OR CONCAT(p.first_name, ' ', p.last_name) LIKE %s
+                    ORDER BY p.patient_id DESC
+                    LIMIT 50
+                """, (f'%{search_query}%', f'%{search_query}%', f'%{search_query}%'))
+        else:
+            # Get recent patients (last 50)
+            cur.execute("""
+                SELECT p.patient_id, p.first_name, p.last_name, 
+                       p.email, p.phone_number, p.dob
+                FROM Patient p
+                ORDER BY p.patient_id DESC
+                LIMIT 50
+            """)
+        
+        patients = cur.fetchall()
+        
+        # Decrypt sensitive fields
+        for patient in patients:
+            if patient.get('email'):
+                try:
+                    patient['email'] = decrypt_data(patient['email'])
+                except Exception as e:
+                    patient['email'] = '[Encrypted]'
+            if patient.get('phone_number'):
+                try:
+                    patient['phone_number'] = decrypt_data(patient['phone_number'])
+                except Exception as e:
+                    patient['phone_number'] = '[Encrypted]'
+        
+        return render_template("patient_list.html", patients=patients, search_query=search_query)
+    except Exception as e:
+        error_msg = str(e)
+        print(f"Error listing patients: {error_msg}")
+        app.logger.error(f"Error listing patients: {error_msg}", exc_info=True)
+        flash(f"Unable to load patient list: {error_msg}", "error")
+        return redirect(url_for("dashboard"))
+    finally:
+        if cur:
+            cur.close()
+        if conn:
+            conn.close()
+
+
+@app.route("/billing", methods=["GET", "POST"])
+@require_role('admin')
 def billing_form():
     if request.method == "POST":
         conn = cur = None
@@ -1027,7 +1085,11 @@ def payment_form():
             if conn:
                 conn.close()
     
-    # For staff/admin: use the original form-based approach
+    # For admin only: use the original form-based approach for payment processing
+    if user_role not in ['patient', 'admin']:
+        flash("Payment processing is only available to administrators.", "error")
+        return redirect(url_for("dashboard"))
+    
     if request.method == "POST":
         conn = cur = None
         try:
@@ -1099,6 +1161,11 @@ def payment_form():
                 cur.close()
             if conn:
                 conn.close()
+    
+    # Only admin can access payment processing form
+    if user_role != 'admin':
+        flash("Payment processing is only available to administrators.", "error")
+        return redirect(url_for("dashboard"))
     
     return render_template("form.html",
         form_title="Payment Processing",

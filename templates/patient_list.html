@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+
+{% block title %}Patient List - Secure Hospital System{% endblock %}
+
+{% block content %}
+<a href="{{ url_for('dashboard') }}" class="back-link">← Back to Dashboard</a>
+<h1>Patient Directory</h1>
+<p class="subtitle">Search and view patient records</p>
+
+<div style="margin-bottom: 24px;">
+    <form method="GET" action="{{ url_for('list_patients') }}" style="display: flex; gap: 12px; max-width: 600px;">
+        <input 
+            type="text" 
+            name="search" 
+            placeholder="Search by name, email, or patient ID..." 
+            value="{{ search_query }}"
+            style="flex: 1; padding: 12px; border: 1px solid var(--border); border-radius: 12px; font-size: 15px; background: rgba(255,255,255,0.04); color: var(--text);"
+        >
+        <button type="submit" class="btn">Search</button>
+        {% if search_query %}
+        <a href="{{ url_for('list_patients') }}" class="ghost-btn">Clear</a>
+        {% endif %}
+    </form>
+</div>
+
+{% if patients|length == 0 %}
+<div style="background: #fff3cd; color: #856404; padding: 20px; border-radius: 12px; text-align: center;">
+    {% if search_query %}
+    <p style="margin: 0;">No patients found matching "{{ search_query }}".</p>
+    {% else %}
+    <p style="margin: 0;">No patients found in the system.</p>
+    {% endif %}
+</div>
+{% else %}
+<div style="overflow-x: auto;">
+    <table style="width: 100%; border-collapse: collapse; background: rgba(255,255,255,0.02); border-radius: 12px; overflow: hidden;">
+        <thead>
+            <tr style="background: rgba(255,255,255,0.05); border-bottom: 2px solid var(--border);">
+                <th style="padding: 14px; text-align: left; font-weight: 600;">Patient ID</th>
+                <th style="padding: 14px; text-align: left; font-weight: 600;">Name</th>
+                <th style="padding: 14px; text-align: left; font-weight: 600;">Email</th>
+                <th style="padding: 14px; text-align: left; font-weight: 600;">Phone</th>
+                <th style="padding: 14px; text-align: left; font-weight: 600;">Date of Birth</th>
+                <th style="padding: 14px; text-align: center; font-weight: 600;">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for patient in patients %}
+            <tr style="border-bottom: 1px solid var(--border); transition: background 0.2s;">
+                <td style="padding: 14px; font-family: monospace; font-weight: 600; color: var(--accent);">#{{ patient.patient_id }}</td>
+                <td style="padding: 14px;">
+                    <strong>{{ patient.first_name }} {{ patient.last_name }}</strong>
+                </td>
+                <td style="padding: 14px; color: var(--muted);">{{ patient.email or 'N/A' }}</td>
+                <td style="padding: 14px; color: var(--muted);">{{ patient.phone_number or 'N/A' }}</td>
+                <td style="padding: 14px; color: var(--muted);">
+                    {{ patient.dob.strftime('%Y-%m-%d') if patient.dob else 'N/A' }}
+                </td>
+                <td style="padding: 14px; text-align: center;">
+                    <div style="display: flex; gap: 8px; justify-content: center;">
+                        <a href="{{ url_for('patient_detail', patient_id=patient.patient_id) }}" 
+                           class="ghost-btn" 
+                           style="padding: 6px 12px; font-size: 13px;">
+                            View
+                        </a>
+                        <a href="{{ url_for('patient_edit', patient_id=patient.patient_id) }}" 
+                           class="ghost-btn" 
+                           style="padding: 6px 12px; font-size: 13px;">
+                            Edit
+                        </a>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% if patients|length >= 50 %}
+<div style="margin-top: 20px; padding: 12px; background: rgba(255,255,255,0.03); border-radius: 8px; text-align: center; color: var(--muted); font-size: 14px;">
+    Showing first 50 results. Use search to find specific patients.
+</div>
+{% endif %}
+{% endif %}
+
+{% endblock %}
+
