@@ -37,6 +37,27 @@
 </section>
 
 <div class="menu-grid">
+    {% if user_role == 'patient' %}
+    {# Patient-only menu items #}
+    <a href="/appointment" class="menu-card tilt stagger">
+        <div class="icon">📅</div>
+        <h3>Book Appointment</h3>
+        <p>Schedule your visit with status tracking.</p>
+    </a>
+    
+    <a href="/my-bills" class="menu-card tilt stagger">
+        <div class="icon">💰</div>
+        <h3>My Bills</h3>
+        <p>View your billing statements and payment history.</p>
+    </a>
+    
+    <a href="/payment" class="menu-card tilt stagger">
+        <div class="icon">💳</div>
+        <h3>Make Payment</h3>
+        <p>Pay your bills using saved payment methods.</p>
+    </a>
+    {% else %}
+    {# Staff/Admin menu items #}
     <a href="/patient" class="menu-card tilt stagger">
         <div class="icon">👤</div>
         <h3>Patient Registration</h3>
@@ -72,5 +93,6 @@
         <h3>Payment</h3>
         <p>Process payments with masked references.</p>
     </a>
+    {% endif %}
 </div>
 {% endblock %}

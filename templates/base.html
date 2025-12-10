@@ -334,7 +334,9 @@
                 </div>
                 <div class="top-actions">
                     {% if is_logged_in %}
-                    <span class="status-pill success">Signed in</span>
+                    <span class="status-pill success">
+                        {% if user_role == 'admin' %}Admin{% elif user_role == 'staff' %}Staff{% elif user_role == 'patient' %}Patient{% else %}User{% endif %}
+                    </span>
                     <a href="{{ url_for('logout') }}" class="ghost-btn">Logout</a>
                     {% else %}
                     <span class="status-pill">Guest mode</span>

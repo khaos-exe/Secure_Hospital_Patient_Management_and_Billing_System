@@ -69,10 +69,53 @@ def get_patient_record(patient_id: int):
             conn.close()
 
 
-# Context processor to make is_logged_in available to all templates
+# Role-based access control
+ROLES = {
+    'PATIENT': 'patient',
+    'STAFF': 'staff',
+    'ADMIN': 'admin'
+}
+
+def get_current_user_role():
+    """Get the current user's role from session"""
+    return session.get('user_role')
+
+def require_login(f):
+    """Decorator to require user to be logged in"""
+    from functools import wraps
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not session.get('logged_in'):
+            flash("Please log in to access this page.", "error")
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
+
+def require_role(*allowed_roles):
+    """Decorator to require specific role(s)"""
+    def decorator(f):
+        from functools import wraps
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            if not session.get('logged_in'):
+                flash("Please log in to access this page.", "error")
+                return redirect(url_for('login'))
+            user_role = session.get('user_role')
+            if user_role not in allowed_roles:
+                flash("You don't have permission to access this page.", "error")
+                return redirect(url_for('dashboard'))
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator
+
+# Context processor to make user info available to all templates
 @app.context_processor
 def inject_user():
-    return dict(is_logged_in=session.get('logged_in', False))
+    return dict(
+        is_logged_in=session.get('logged_in', False),
+        user_role=session.get('user_role'),
+        user_name=session.get('user_name', 'User')
+    )
 
 
 def generate_csrf_token() -> str:
@@ -132,55 +175,100 @@ def add_security_headers(response):
 
 @app.route("/")
 def index():
+    # If not logged in, redirect to login page
+    if not session.get("logged_in"):
+        return redirect(url_for("login"))
+    # If logged in, show the main dashboard
+    return render_template("index.html")
+
+
+@app.route("/dashboard")
+def dashboard():
+    # Main dashboard page (only accessible after login)
+    if not session.get("logged_in"):
+        return redirect(url_for("login"))
     return render_template("index.html")
 
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
+    # Hardcoded credentials for different roles
+    CREDENTIALS = {
+        'admin': {
+            'email': 'root@gmail.com',
+            'password': 'default',
+            'role': 'admin',
+            'name': 'Administrator'
+        },
+        'staff': {
+            'email': 'staff@hospital.com',
+            'password': 'staff123',
+            'role': 'staff',
+            'name': 'Staff Member'
+        },
+        'patient': {
+            'email': 'patient@hospital.com',
+            'password': 'patient123',
+            'role': 'patient',
+            'name': 'Patient'
+        }
+    }
+    
     if request.method == "POST":
         email = request.form.get("email", "").strip().lower()
+        password = request.form.get("password", "")
+        
         if not EMAIL_REGEX.match(email):
             return render_template("login.html", error="Enter a valid email address.")
         
-        # Check if patient exists by email (email is encrypted, so we need to decrypt and compare)
-        patient_id = None
-        patients = []
-        conn = cur = None
-        try:
-            conn = get_db_conn()
-            cur = conn.cursor()
-            # Get all patients and decrypt emails to find match
-            cur.execute("SELECT patient_id, email FROM Patient")
-            patients = cur.fetchall()
-        except Exception as e:
-            print(f"Login error while querying database: {e}")
-            return render_template("login.html", error="Unable to process login right now. Please try again.")
-        finally:
-            if cur:
-                cur.close()
-            if conn:
-                conn.close()
-
-        # Find patient with matching email
-        for p in patients:
-            encrypted_email = p[1]
-            if not encrypted_email:
-                continue
-            try:
-                decrypted_email = decrypt_data(encrypted_email).strip().lower()
-                if decrypted_email == email:
-                    patient_id = p[0]
-                    break
-            except Exception as decrypt_err:
-                print(f"Skipping patient {p[0]} due to decrypt error: {decrypt_err}")
-                continue
-
-        if patient_id:
-            session['logged_in'] = True
-            session['patient_id'] = patient_id
-            return redirect(url_for("index"))
-        else:
-            return render_template("login.html", error="Email not found. Please register first.")
+        # Check credentials against all roles
+        for role_key, creds in CREDENTIALS.items():
+            if email == creds['email'].lower() and password == creds['password']:
+                session['logged_in'] = True
+                session['user_role'] = creds['role']
+                session['user_name'] = creds['name']
+                # For patients, we need to get their actual patient_id from database
+                # For now, set a default user_id (in real app, would look up from DB)
+                if creds['role'] == 'patient':
+                    # Try to find patient by email in database
+                    conn = cur = None
+                    try:
+                        conn = get_db_conn()
+                        cur = conn.cursor()
+                        cur.execute("SELECT patient_id, email FROM Patient")
+                        patients = cur.fetchall()
+                        patient_id = None
+                        for p in patients:
+                            if p[1]:  # if email exists
+                                try:
+                                    decrypted_email = decrypt_data(p[1]).strip().lower()
+                                    if decrypted_email == email:
+                                        patient_id = p[0]
+                                        break
+                                except:
+                                    continue
+                        if patient_id:
+                            session['user_id'] = patient_id
+                            session['patient_id'] = patient_id
+                        else:
+                            # Default patient ID for demo
+                            session['user_id'] = 1
+                            session['patient_id'] = 1
+                    except Exception as e:
+                        print(f"Error looking up patient: {e}")
+                        session['user_id'] = 1
+                        session['patient_id'] = 1
+                    finally:
+                        if cur:
+                            cur.close()
+                        if conn:
+                            conn.close()
+                else:
+                    session['user_id'] = 1  # Default for staff/admin
+                flash(f"Welcome! You have successfully logged in as {creds['name']}.", "success")
+                return redirect(url_for("dashboard"))
+        
+        return render_template("login.html", error="Invalid email or password.")
     
     return render_template("login.html")
 
@@ -321,7 +409,10 @@ def patient_form():
             conn.commit()
             # Auto-login after registration
             session['logged_in'] = True
-            session['patient_id'] = patient_id
+            session['user_id'] = patient_id
+            session['user_role'] = 'patient'
+            session['patient_id'] = patient_id  # Backward compatibility
+            session['user_name'] = f"{first_name} {last_name}"
             
             # Redirect to the nice success page
             return redirect(url_for("success"))
@@ -360,9 +451,13 @@ def patient_form():
 
 
 @app.route("/patient/<int:patient_id>")
+@require_login
 def patient_detail(patient_id: int):
-    if not session.get("logged_in"):
-        return redirect(url_for("login"))
+    # Patients can only view their own records, staff/admin can view any
+    user_role = get_current_user_role()
+    if user_role == 'patient' and session.get('user_id') != patient_id:
+        flash("You can only view your own patient record.", "error")
+        return redirect(url_for("dashboard"))
     record = get_patient_record(patient_id)
     if not record:
         abort(404)
@@ -370,9 +465,13 @@ def patient_detail(patient_id: int):
 
 
 @app.route("/patient/<int:patient_id>/edit", methods=["GET", "POST"])
+@require_login
 def patient_edit(patient_id: int):
-    if not session.get("logged_in"):
-        return redirect(url_for("login"))
+    # Patients can only edit their own records, staff/admin can edit any
+    user_role = get_current_user_role()
+    if user_role == 'patient' and session.get('user_id') != patient_id:
+        flash("You can only edit your own patient record.", "error")
+        return redirect(url_for("dashboard"))
     record = get_patient_record(patient_id)
     if not record:
         abort(404)
@@ -435,6 +534,7 @@ def patient_edit(patient_id: int):
 
 
 @app.route("/staff", methods=["GET", "POST"])
+@require_role('staff', 'admin')
 def staff_form():
     template_kwargs = dict(
         form_title="Staff Registration",
@@ -501,47 +601,71 @@ def staff_form():
 
 
 @app.route("/appointment", methods=["GET", "POST"])
+@require_login
 def appointment_form():
-    form_fields = [
-        {'name': 'patient_id', 'label': 'Patient ID', 'type': 'text', 'required': True, 'placeholder': 'Enter Patient ID'},
-        {'name': 'doctor_id', 'label': 'Doctor ID', 'type': 'text', 'required': False, 'placeholder': 'Enter Staff/Doctor ID (optional)'},
-        {'name': 'appointment_date', 'label': 'Appointment Date & Time', 'type': 'datetime-local', 'required': True},
-        {'name': 'status', 'label': 'Status', 'type': 'select', 'required': False,
-         'options': [
-             {'value': 'Scheduled', 'label': 'Scheduled', 'selected': True},
-             {'value': 'Confirmed', 'label': 'Confirmed'},
-             {'value': 'Cancelled', 'label': 'Cancelled'},
-             {'value': 'Completed', 'label': 'Completed'}
-         ]}
-    ]
+    user_role = get_current_user_role()
+    user_id = session.get('patient_id') or session.get('user_id')
+    
+    # For patients: auto-fill patient_id, for staff/admin: allow selecting any patient
+    if user_role == 'patient':
+        # Patients can only book for themselves
+        form_fields = [
+            {'name': 'doctor_id', 'label': 'Doctor ID', 'type': 'text', 'required': False, 'placeholder': 'Enter Staff/Doctor ID (optional)'},
+            {'name': 'appointment_date', 'label': 'Appointment Date & Time', 'type': 'datetime-local', 'required': True},
+        ]
+        patient_id_val = user_id
+        status = "Scheduled"  # Default for patients
+    else:
+        # Staff/admin can book for any patient
+        form_fields = [
+            {'name': 'patient_id', 'label': 'Patient ID', 'type': 'text', 'required': True, 'placeholder': 'Enter Patient ID'},
+            {'name': 'doctor_id', 'label': 'Doctor ID', 'type': 'text', 'required': False, 'placeholder': 'Enter Staff/Doctor ID (optional)'},
+            {'name': 'appointment_date', 'label': 'Appointment Date & Time', 'type': 'datetime-local', 'required': True},
+            {'name': 'status', 'label': 'Status', 'type': 'select', 'required': False,
+             'options': [
+                 {'value': 'Scheduled', 'label': 'Scheduled', 'selected': True},
+                 {'value': 'Confirmed', 'label': 'Confirmed'},
+                 {'value': 'Cancelled', 'label': 'Cancelled'},
+                 {'value': 'Completed', 'label': 'Completed'}
+             ]}
+        ]
 
     if request.method == "POST":
         conn = cur = None
         try:
-            patient_id_raw = request.form.get("patient_id", "").strip()
-            doctor_id_raw = request.form.get("doctor_id", "").strip()
-            appt_date = request.form.get("appointment_date")
-            status = request.form.get("status", "Scheduled")
+            if user_role == 'patient':
+                # Patient ID is already set from session
+                doctor_id_raw = request.form.get("doctor_id", "").strip()
+                appt_date = request.form.get("appointment_date")
+                if not appt_date:
+                    flash("Appointment date is required.", "error")
+                    return redirect(url_for("appointment_form"))
+            else:
+                # Staff/admin: get from form
+                patient_id_raw = request.form.get("patient_id", "").strip()
+                doctor_id_raw = request.form.get("doctor_id", "").strip()
+                appt_date = request.form.get("appointment_date")
+                status = request.form.get("status", "Scheduled")
+                
+                if not patient_id_raw or not appt_date:
+                    flash("Patient ID and appointment date are required.", "error")
+                    return render_template("form.html",
+                                           form_title="Book Appointment",
+                                           form_subtitle="Schedule a new appointment",
+                                           form_action="/appointment",
+                                           submit_button_text="Book Appointment",
+                                           form_fields=form_fields), 400
 
-            if not patient_id_raw or not appt_date:
-                flash("Patient ID and appointment date are required.", "error")
-                return render_template("form.html",
-                                       form_title="Book Appointment",
-                                       form_subtitle="Schedule a new appointment",
-                                       form_action="/appointment",
-                                       submit_button_text="Book Appointment",
-                                       form_fields=form_fields), 400
-
-            try:
-                patient_id_val = int(patient_id_raw)
-            except ValueError:
-                flash("Patient ID must be a number.", "error")
-                return render_template("form.html",
-                                       form_title="Book Appointment",
-                                       form_subtitle="Schedule a new appointment",
-                                       form_action="/appointment",
-                                       submit_button_text="Book Appointment",
-                                       form_fields=form_fields), 400
+                try:
+                    patient_id_val = int(patient_id_raw)
+                except ValueError:
+                    flash("Patient ID must be a number.", "error")
+                    return render_template("form.html",
+                                           form_title="Book Appointment",
+                                           form_subtitle="Schedule a new appointment",
+                                           form_action="/appointment",
+                                           submit_button_text="Book Appointment",
+                                           form_fields=form_fields), 400
 
             doctor_id_val = None
             if doctor_id_raw:
@@ -605,6 +729,7 @@ def appointment_form():
 
 
 @app.route("/medical-record", methods=["GET", "POST"])
+@require_role('staff', 'admin')
 def medical_record_form():
     if request.method == "POST":
         conn = cur = None
@@ -658,7 +783,56 @@ def medical_record_form():
         ])
 
 
+@app.route("/my-bills")
+@require_login
+def view_my_bills():
+    """Patients can view their own bills"""
+    user_role = get_current_user_role()
+    user_id = session.get('patient_id') or session.get('user_id')
+    
+    if user_role != 'patient':
+        flash("This page is for patients only.", "error")
+        return redirect(url_for("dashboard"))
+    
+    conn = cur = None
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor(dictionary=True)
+        
+        # Get all bills for this patient
+        cur.execute("""
+            SELECT billing_id, total_amount, paid_amount, status, created_at, payment_due_date
+            FROM Billing
+            WHERE patient_id = %s
+            ORDER BY created_at DESC
+        """, (user_id,))
+        
+        bills = cur.fetchall()
+        
+        # Get payment transactions for each bill
+        for bill in bills:
+            cur.execute("""
+                SELECT amount, paid_at, status, note
+                FROM Payment_Transactions
+                WHERE billing_id = %s
+                ORDER BY paid_at DESC
+            """, (bill['billing_id'],))
+            bill['payments'] = cur.fetchall()
+        
+        return render_template("my_bills.html", bills=bills)
+    except Exception as e:
+        print(f"Error fetching bills: {e}")
+        flash("Unable to load billing information.", "error")
+        return redirect(url_for("dashboard"))
+    finally:
+        if cur:
+            cur.close()
+        if conn:
+            conn.close()
+
+
 @app.route("/billing", methods=["GET", "POST"])
+@require_role('staff', 'admin')
 def billing_form():
     if request.method == "POST":
         conn = cur = None
@@ -722,7 +896,138 @@ def billing_form():
 
 
 @app.route("/payment", methods=["GET", "POST"])
+@require_login
 def payment_form():
+    user_role = get_current_user_role()
+    # For patients, use patient_id from session, for others use user_id
+    if user_role == 'patient':
+        user_id = session.get('patient_id') or session.get('user_id')
+    else:
+        user_id = session.get('user_id')
+    
+    # For patients: show their bills and payment methods
+    if user_role == 'patient':
+        if request.method == "POST":
+            conn = cur = None
+            try:
+                conn = get_db_conn()
+                cur = conn.cursor(dictionary=True)
+                
+                billing_id = request.form.get("billing_id", "").strip()
+                payment_method_id = request.form.get("payment_method_id", "").strip()
+                payment_amount = request.form.get("payment_amount", "").strip()
+                
+                # Validate inputs
+                if not billing_id or not payment_method_id or not payment_amount:
+                    flash("All fields are required.", "error")
+                    return redirect(url_for("payment_form"))
+                
+                try:
+                    billing_id_val = int(billing_id)
+                    payment_method_id_val = int(payment_method_id) if payment_method_id else None
+                    payment_amount_val = Decimal(payment_amount).quantize(Decimal("0.01"))
+                except (ValueError, InvalidOperation):
+                    flash("Invalid input values.", "error")
+                    return redirect(url_for("payment_form"))
+                
+                # Verify billing belongs to this patient
+                cur.execute("SELECT patient_id, total_amount, status FROM Billing WHERE billing_id = %s", (billing_id_val,))
+                billing = cur.fetchone()
+                if not billing:
+                    flash("Billing record not found.", "error")
+                    return redirect(url_for("payment_form"))
+                
+                if billing['patient_id'] != user_id:
+                    flash("You can only make payments for your own bills.", "error")
+                    return redirect(url_for("payment_form"))
+                
+                # Verify payment method belongs to this patient
+                if payment_method_id_val:
+                    cur.execute("SELECT payment_method_id, type, last4 FROM Payment_Methods WHERE payment_method_id = %s AND patient_id = %s", 
+                              (payment_method_id_val, user_id))
+                    pm = cur.fetchone()
+                    if not pm:
+                        flash("Invalid payment method.", "error")
+                        return redirect(url_for("payment_form"))
+                
+                # Generate random transaction ID
+                transaction_id = secrets.token_hex(16)  # 32 character hex string
+                encrypted_transaction = encrypt_data(transaction_id)
+                
+                # Store transaction info in note field
+                payment_method_type = pm['type'] if pm else 'CARD'
+                payment_method_last4 = pm['last4'] if pm else 'N/A'
+                transaction_note = f"Payment Method: {payment_method_type} ending in {payment_method_last4}; Transaction ID: {transaction_id}"
+                
+                # Insert into Payment_Transactions
+                cur.execute(
+                    """INSERT INTO Payment_Transactions (billing_id, patient_id, payment_method_id, amount, paid_at, status, note)
+                       VALUES (%s, %s, %s, %s, NOW(), %s, %s)""",
+                    (billing_id_val, user_id, payment_method_id_val, payment_amount_val, 'Posted', transaction_note)
+                )
+                
+                conn.commit()
+                flash(f"Payment processed successfully! Transaction ID: {transaction_id}", "success")
+                return redirect(url_for("dashboard"))
+            except Exception as e:
+                if conn:
+                    conn.rollback()
+                print("Payment processing error:", repr(e))
+                flash(f"Unable to process payment: {str(e)}", "error")
+                return redirect(url_for("payment_form"))
+            finally:
+                if cur:
+                    cur.close()
+                if conn:
+                    conn.close()
+        
+        # GET: Show patient's payment history and ability to make new payments
+        conn = cur = None
+        try:
+            conn = get_db_conn()
+            cur = conn.cursor(dictionary=True)
+            
+            # Get patient's bills (for making payments)
+            cur.execute("""
+                SELECT billing_id, total_amount, paid_amount, status, created_at, payment_due_date
+                FROM Billing
+                WHERE patient_id = %s
+                ORDER BY created_at DESC
+            """, (user_id,))
+            bills = cur.fetchall()
+            
+            # Get patient's payment methods
+            cur.execute("""
+                SELECT payment_method_id, type, last4, is_default
+                FROM Payment_Methods
+                WHERE patient_id = %s
+                ORDER BY is_default DESC, created_at DESC
+            """, (user_id,))
+            payment_methods = cur.fetchall()
+            
+            # Get patient's payment history (transactions)
+            cur.execute("""
+                SELECT pt.payment_id, pt.billing_id, pt.amount, pt.paid_at, pt.status, pt.note,
+                       b.total_amount as bill_total
+                FROM Payment_Transactions pt
+                JOIN Billing b ON pt.billing_id = b.billing_id
+                WHERE pt.patient_id = %s
+                ORDER BY pt.paid_at DESC
+            """, (user_id,))
+            payment_history = cur.fetchall()
+            
+            return render_template("patient_payment.html", bills=bills, payment_methods=payment_methods, payment_history=payment_history)
+        except Exception as e:
+            print(f"Error loading payment page: {e}")
+            flash("Unable to load payment information.", "error")
+            return redirect(url_for("dashboard"))
+        finally:
+            if cur:
+                cur.close()
+            if conn:
+                conn.close()
+    
+    # For staff/admin: use the original form-based approach
     if request.method == "POST":
         conn = cur = None
         try:
@@ -759,11 +1064,11 @@ def payment_form():
             if pm_row:
                 payment_method_id = pm_row[0]
             
-            # Store transaction info in note field (transaction_id is encrypted, store method name for reference)
+            # Store transaction info in note field
             payment_method_name = request.form.get('payment_method', '')
             transaction_note = f"Payment Method: {payment_method_name}; Transaction ID: [encrypted]"
             
-            # Use Payment_Transactions instead of Payment
+            # Use Payment_Transactions
             cur.execute(
                 """INSERT INTO Payment_Transactions (billing_id, patient_id, payment_method_id, amount, paid_at, status, note)
                    VALUES (%s, %s, %s, %s, %s, %s, %s)""",
@@ -807,6 +1112,105 @@ def payment_form():
             {'name': 'payment_method', 'label': 'Payment Method', 'type': 'text', 'required': True, 'placeholder': 'e.g., Credit Card, Debit Card, Cash'},
             {'name': 'transaction_id', 'label': 'Transaction ID', 'type': 'text', 'required': True, 'placeholder': 'Enter transaction ID'}
         ])
+
+
+@app.route("/add-payment-method", methods=["GET", "POST"])
+@require_login
+def add_payment_method():
+    """Add a new payment method (credit card) for the logged-in patient"""
+    user_role = get_current_user_role()
+    user_id = session.get('patient_id') or session.get('user_id')
+    
+    # Only patients can add payment methods
+    if user_role != 'patient':
+        flash("Only patients can add payment methods.", "error")
+        return redirect(url_for("dashboard"))
+    
+    if request.method == "POST":
+        conn = cur = None
+        try:
+            card_number = request.form.get("card_number", "").strip()
+            zip_code = request.form.get("zip_code", "").strip()
+            
+            # Server-side validation
+            errors = []
+            
+            # Validate card number: exactly 16 digits
+            card_digits_only = re.sub(r'\D', '', card_number)
+            if len(card_digits_only) != 16:
+                errors.append("Credit card number must be exactly 16 digits.")
+            elif not card_digits_only.isdigit():
+                errors.append("Credit card number must contain only numbers.")
+            
+            # Validate zip code: numbers only, 5 digits (US standard, but flexible)
+            zip_digits_only = re.sub(r'\D', '', zip_code)
+            if not zip_digits_only or len(zip_digits_only) < 5:
+                errors.append("Zip code must be at least 5 digits.")
+            elif not zip_digits_only.isdigit():
+                errors.append("Zip code must contain only numbers.")
+            
+            if errors:
+                for error in errors:
+                    flash(error, "error")
+                return render_template("add_payment_method.html", 
+                                     form_data={"card_number": card_number, "zip_code": zip_code})
+            
+            # Use cleaned card number (digits only)
+            card_number_clean = card_digits_only
+            zip_code_clean = zip_digits_only
+            
+            conn = get_db_conn()
+            cur = conn.cursor(dictionary=True)
+            
+            # Check if patient exists
+            cur.execute("SELECT patient_id FROM Patient WHERE patient_id = %s", (user_id,))
+            if not cur.fetchone():
+                flash("Patient record not found.", "error")
+                return redirect(url_for("dashboard"))
+            
+            # Extract last 4 digits for display
+            card_last4 = card_number_clean[-4:]
+            
+            # Encrypt the full card number (following security protocols)
+            encrypted_card = encrypt_data(card_number_clean)
+            
+            # Check if this is the first payment method (make it default)
+            cur.execute("SELECT COUNT(*) as count FROM Payment_Methods WHERE patient_id = %s", (user_id,))
+            count_result = cur.fetchone()
+            is_first = count_result['count'] == 0 if count_result else True
+            
+            # Insert into Payment_Methods table
+            cur.execute(
+                """
+                INSERT INTO Payment_Methods (patient_id, type, last4, data_enc, is_default)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (user_id, 'CARD', card_last4, encrypted_card, is_first)
+            )
+            
+            conn.commit()
+            flash(f"Payment method added successfully! Card ending in {card_last4} has been saved.", "success")
+            return redirect(url_for("payment_form"))
+            
+        except Exception as e:
+            if conn:
+                conn.rollback()
+            print(f"Error adding payment method: {e}")
+            app.logger.error(f"Error adding payment method: {str(e)}", exc_info=True)
+            flash(f"Unable to add payment method: {str(e)}", "error")
+            form_data = {
+                "card_number": request.form.get("card_number", ""),
+                "zip_code": request.form.get("zip_code", "")
+            }
+            return render_template("add_payment_method.html", form_data=form_data)
+        finally:
+            if cur:
+                cur.close()
+            if conn:
+                conn.close()
+    
+    # GET: Show the form
+    return render_template("add_payment_method.html", form_data={})
 
 
 @app.route("/success")

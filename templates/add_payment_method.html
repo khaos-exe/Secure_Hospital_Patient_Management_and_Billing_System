@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+
+{% block title %}Add Payment Method - Secure Hospital System{% endblock %}
+
+{% block content %}
+<a href="{{ url_for('payment_form') }}" class="back-link">← Back to Payments</a>
+<h1>Add Payment Method</h1>
+<p class="subtitle">Securely add a credit card for future payments</p>
+
+<form method="POST" action="/add-payment-method" autocomplete="off" id="paymentMethodForm">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    
+    <div class="field-card">
+        <label for="card_number">Credit Card Number <span class="required">*</span></label>
+        <input 
+            type="text" 
+            id="card_number" 
+            name="card_number" 
+            maxlength="19"
+            required 
+            placeholder="1234 5678 9012 3456"
+            value="{{ form_data.card_number|default('') }}"
+            pattern="[0-9\s]{13,19}"
+            style="width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 12px; font-size: 15px; font-family: inherit; background: rgba(255,255,255,0.04); color: var(--text);"
+        >
+        <div class="hint">Enter 16-digit credit card number (spaces allowed for readability)</div>
+        <div id="card_preview" class="mask-preview" style="margin-top: 8px; display: none;">
+            <span id="card_display">Card: •••• •••• •••• </span><span id="card_last4" style="font-weight: 600;"></span>
+        </div>
+    </div>
+    
+    <div class="field-card">
+        <label for="zip_code">Zip Code <span class="required">*</span></label>
+        <input 
+            type="text" 
+            id="zip_code" 
+            name="zip_code" 
+            maxlength="10"
+            required 
+            placeholder="12345"
+            value="{{ form_data.zip_code|default('') }}"
+            pattern="[0-9]{5,10}"
+            style="width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 12px; font-size: 15px; font-family: inherit; background: rgba(255,255,255,0.04); color: var(--text);"
+        >
+        <div class="hint">Enter 5-digit zip code (numbers only)</div>
+    </div>
+    
+    <div style="background: rgba(34,197,94,0.1); border: 1px solid rgba(34,197,94,0.3); border-radius: 12px; padding: 16px; margin-bottom: 20px;">
+        <div style="display: flex; align-items: start; gap: 12px;">
+            <div style="font-size: 20px;">🔒</div>
+            <div>
+                <strong style="color: #22c55e; display: block; margin-bottom: 6px;">Security Notice</strong>
+                <p style="color: var(--muted); font-size: 14px; margin: 0; line-height: 1.5;">
+                    Your credit card number is encrypted using AES-256-GCM encryption before storage. 
+                    Only the last 4 digits are stored in plain text for display purposes. 
+                    Full card numbers are never displayed or transmitted in plain text.
+                </p>
+            </div>
+        </div>
+    </div>
+    
+    <button type="submit" class="submit-btn">Add Payment Method</button>
+</form>
+
+<script>
+(function() {
+    const cardInput = document.getElementById('card_number');
+    const zipInput = document.getElementById('zip_code');
+    const cardPreview = document.getElementById('card_preview');
+    const cardLast4 = document.getElementById('card_last4');
+    const form = document.getElementById('paymentMethodForm');
+    
+    // Format card number with spaces (XXXX XXXX XXXX XXXX)
+    cardInput.addEventListener('input', function(e) {
+        let value = e.target.value.replace(/\s/g, ''); // Remove all spaces
+        value = value.replace(/\D/g, ''); // Remove non-digits
+        
+        // Limit to 16 digits
+        if (value.length > 16) {
+            value = value.substring(0, 16);
+        }
+        
+        // Add spaces every 4 digits
+        let formatted = '';
+        for (let i = 0; i < value.length; i++) {
+            if (i > 0 && i % 4 === 0) {
+                formatted += ' ';
+            }
+            formatted += value[i];
+        }
+        
+        e.target.value = formatted;
+        
+        // Show preview if we have at least 4 digits
+        if (value.length >= 4) {
+            cardPreview.style.display = 'block';
+            cardLast4.textContent = value.substring(value.length - 4);
+        } else {
+            cardPreview.style.display = 'none';
+        }
+    });
+    
+    // Validate card number on blur
+    cardInput.addEventListener('blur', function(e) {
+        const digitsOnly = e.target.value.replace(/\D/g, '');
+        if (digitsOnly.length !== 16 && digitsOnly.length > 0) {
+            e.target.setCustomValidity('Credit card number must be exactly 16 digits');
+            e.target.reportValidity();
+        } else {
+            e.target.setCustomValidity('');
+        }
+    });
+    
+    // Format and validate zip code (numbers only)
+    zipInput.addEventListener('input', function(e) {
+        let value = e.target.value.replace(/\D/g, ''); // Remove non-digits
+        e.target.value = value;
+    });
+    
+    // Validate zip code on blur
+    zipInput.addEventListener('blur', function(e) {
+        const digitsOnly = e.target.value.replace(/\D/g, '');
+        if (digitsOnly.length < 5 && digitsOnly.length > 0) {
+            e.target.setCustomValidity('Zip code must be at least 5 digits');
+            e.target.reportValidity();
+        } else {
+            e.target.setCustomValidity('');
+        }
+    });
+    
+    // Form submission validation
+    form.addEventListener('submit', function(e) {
+        const cardDigits = cardInput.value.replace(/\D/g, '');
+        const zipDigits = zipInput.value.replace(/\D/g, '');
+        
+        if (cardDigits.length !== 16) {
+            e.preventDefault();
+            cardInput.focus();
+            cardInput.setCustomValidity('Credit card number must be exactly 16 digits');
+            cardInput.reportValidity();
+            return false;
+        }
+        
+        if (zipDigits.length < 5) {
+            e.preventDefault();
+            zipInput.focus();
+            zipInput.setCustomValidity('Zip code must be at least 5 digits');
+            zipInput.reportValidity();
+            return false;
+        }
+        
+        // Clear any previous validation messages
+        cardInput.setCustomValidity('');
+        zipInput.setCustomValidity('');
+    });
+    
+    // Initialize preview if form has existing data
+    if (cardInput.value) {
+        const digitsOnly = cardInput.value.replace(/\D/g, '');
+        if (digitsOnly.length >= 4) {
+            cardPreview.style.display = 'block';
+            cardLast4.textContent = digitsOnly.substring(digitsOnly.length - 4);
+        }
+    }
+})();
+</script>
+
+{% endblock %}
+

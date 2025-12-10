@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+
+{% block title %}My Bills - Secure Hospital System{% endblock %}
+
+{% block content %}
+<a href="{{ url_for('dashboard') }}" class="back-link">← Back to Dashboard</a>
+<h1>My Bills</h1>
+<p class="subtitle">View your billing statements and payment history</p>
+
+{% if bills|length == 0 %}
+<div style="background: #fff3cd; color: #856404; padding: 15px; border-radius: 5px; margin-bottom: 20px;">
+    You don't have any bills at this time.
+</div>
+{% else %}
+<div style="display: grid; gap: 20px;">
+    {% for bill in bills %}
+    <div style="border: 1px solid #ddd; border-radius: 8px; padding: 20px; background: #fff;">
+        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 15px;">
+            <div>
+                <h3 style="margin: 0 0 10px 0;">Bill #{{ bill.billing_id }}</h3>
+                <div style="color: #666; margin-bottom: 5px;">
+                    <strong>Total Amount:</strong> ${{ "%.2f"|format(bill.total_amount) }}
+                </div>
+                {% if bill.paid_amount %}
+                <div style="color: #666; margin-bottom: 5px;">
+                    <strong>Paid:</strong> ${{ "%.2f"|format(bill.paid_amount) }}
+                </div>
+                <div style="color: #666;">
+                    <strong>Balance:</strong> ${{ "%.2f"|format(bill.total_amount - bill.paid_amount) }}
+                </div>
+                {% endif %}
+            </div>
+            <div>
+                <span class="status-pill {% if bill.status == 'Paid' %}success{% elif bill.status == 'Pending' %}warning{% else %}error{% endif %}">
+                    {{ bill.status }}
+                </span>
+            </div>
+        </div>
+        
+        {% if bill.payment_due_date %}
+        <div style="color: #666; margin-bottom: 10px;">
+            <strong>Due Date:</strong> {{ bill.payment_due_date.strftime('%Y-%m-%d') if bill.payment_due_date else 'N/A' }}
+        </div>
+        {% endif %}
+        
+        <div style="color: #666; font-size: 0.9em;">
+            <strong>Created:</strong> {{ bill.created_at.strftime('%Y-%m-%d') if bill.created_at else 'N/A' }}
+        </div>
+        
+        {% if bill.payments|length > 0 %}
+        <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #eee;">
+            <strong style="display: block; margin-bottom: 10px;">Payment History:</strong>
+            <div style="display: grid; gap: 10px;">
+                {% for payment in bill.payments %}
+                <div style="padding: 10px; background: #f8f9fa; border-radius: 5px; font-size: 0.9em;">
+                    <div style="display: flex; justify-content: space-between;">
+                        <span>${{ "%.2f"|format(payment.amount) }}</span>
+                        <span style="color: #666;">{{ payment.paid_at.strftime('%Y-%m-%d %H:%M') if payment.paid_at else 'N/A' }}</span>
+                    </div>
+                    {% if payment.note %}
+                    <div style="color: #666; margin-top: 5px; font-size: 0.85em;">
+                        {{ payment.note[:100] }}{% if payment.note|length > 100 %}...{% endif %}
+                    </div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+        
+        {% if bill.status != 'Paid' %}
+        <div style="margin-top: 15px;">
+            <a href="{{ url_for('payment_form') }}?billing_id={{ bill.billing_id }}" class="btn" style="display: inline-block;">
+                Make Payment
+            </a>
+        </div>
+        {% endif %}
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% endblock %}
+
