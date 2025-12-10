@@ -1280,6 +1280,100 @@ def add_payment_method():
     return render_template("add_payment_method.html", form_data={})
 
 
+@app.route("/admin/tables")
+@require_role('admin')
+def admin_view_tables():
+    """Admin view to browse any database table"""
+    conn = cur = None
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor(dictionary=True)
+        
+        # Get the selected table name
+        table_name = request.args.get('table', '').strip()
+        page = int(request.args.get('page', 1))
+        limit = 50
+        offset = (page - 1) * limit
+        
+        # Get list of all tables in the database
+        cur.execute("""
+            SELECT TABLE_NAME 
+            FROM information_schema.TABLES 
+            WHERE TABLE_SCHEMA = DATABASE()
+            ORDER BY TABLE_NAME
+        """)
+        all_tables = [row['TABLE_NAME'] for row in cur.fetchall()]
+        
+        table_data = None
+        total_rows = 0
+        columns = []
+        
+        if table_name:
+            # Validate table name to prevent SQL injection
+            if table_name not in all_tables:
+                flash(f"Table '{table_name}' not found.", "error")
+                return render_template("admin_tables.html", 
+                                     tables=all_tables, 
+                                     selected_table=None,
+                                     table_data=None,
+                                     columns=[],
+                                     page=1,
+                                     total_pages=0)
+            
+            # Get column information
+            cur.execute(f"""
+                SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE
+                FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s
+                ORDER BY ORDINAL_POSITION
+            """, (table_name,))
+            columns = cur.fetchall()
+            
+            # Get total row count
+            cur.execute(f"SELECT COUNT(*) as count FROM `{table_name}`")
+            total_rows = cur.fetchone()['count']
+            total_pages = (total_rows + limit - 1) // limit
+            
+            # Get table data with pagination
+            cur.execute(f"SELECT * FROM `{table_name}` LIMIT %s OFFSET %s", (limit, offset))
+            table_data = cur.fetchall()
+            
+            # Try to decrypt BLOB fields that might be encrypted
+            for row in table_data:
+                for key, value in row.items():
+                    if isinstance(value, bytes) and value:
+                        try:
+                            # Try to decrypt - if it fails, keep as is
+                            decrypted = decrypt_data(value)
+                            row[key] = decrypted
+                        except:
+                            # If decryption fails, show as hex or base64
+                            try:
+                                row[key] = f"[BLOB: {len(value)} bytes]"
+                            except:
+                                row[key] = "[Binary Data]"
+        
+        return render_template("admin_tables.html",
+                             tables=all_tables,
+                             selected_table=table_name,
+                             table_data=table_data,
+                             columns=columns,
+                             page=page,
+                             total_pages=total_pages if table_name else 0,
+                             total_rows=total_rows)
+    except Exception as e:
+        error_msg = str(e)
+        print(f"Error viewing tables: {error_msg}")
+        app.logger.error(f"Error viewing tables: {error_msg}", exc_info=True)
+        flash(f"Unable to load table data: {error_msg}", "error")
+        return redirect(url_for("dashboard"))
+    finally:
+        if cur:
+            cur.close()
+        if conn:
+            conn.close()
+
+
 @app.route("/success")
 def success():
     message = request.args.get("message", "Your information has been successfully submitted and securely stored in the system.")

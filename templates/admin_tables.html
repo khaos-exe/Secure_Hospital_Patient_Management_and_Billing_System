@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+
+{% block title %}Database Tables - Admin View{% endblock %}
+
+{% block content %}
+<a href="{{ url_for('dashboard') }}" class="back-link">← Back to Dashboard</a>
+<h1>Database Tables Viewer</h1>
+<p class="subtitle">View any database table in raw format (Admin Only)</p>
+
+<div style="display: grid; grid-template-columns: 250px 1fr; gap: 20px; margin-top: 20px;">
+    <!-- Table List Sidebar -->
+    <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 12px; padding: 16px;">
+        <h3 style="font-size: 16px; margin-bottom: 12px; color: var(--text);">Available Tables</h3>
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+            {% for table in tables %}
+            <a href="{{ url_for('admin_view_tables', table=table) }}" 
+               style="padding: 10px; border-radius: 8px; text-decoration: none; color: var(--text); 
+                      {% if selected_table == table %}background: rgba(34,197,94,0.15); border: 1px solid rgba(34,197,94,0.3);{% else %}background: rgba(255,255,255,0.03); border: 1px solid var(--border);{% endif %}
+                      transition: all 0.2s;"
+               onmouseover="this.style.background='rgba(34,197,94,0.1)'" 
+               onmouseout="this.style.background='{% if selected_table == table %}rgba(34,197,94,0.15){% else %}rgba(255,255,255,0.03){% endif %}'">
+                <strong>{{ table }}</strong>
+            </a>
+            {% endfor %}
+        </div>
+    </div>
+    
+    <!-- Table Content -->
+    <div>
+        {% if selected_table %}
+        <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 12px; padding: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <div>
+                    <h2 style="margin: 0; font-size: 20px;">Table: <code style="color: var(--accent);">{{ selected_table }}</code></h2>
+                    {% if total_rows is defined %}
+                    <p style="margin: 8px 0 0 0; color: var(--muted); font-size: 14px;">
+                        Total rows: {{ total_rows }} | Showing {{ ((page - 1) * 50) + 1 }} - {% if page * 50 > total_rows %}{{ total_rows }}{% else %}{{ page * 50 }}{% endif %}
+                    </p>
+                    {% endif %}
+                </div>
+            </div>
+            
+            {% if columns|length > 0 %}
+            <div style="margin-bottom: 16px; padding: 12px; background: rgba(255,255,255,0.03); border-radius: 8px;">
+                <strong style="color: var(--muted); font-size: 13px;">Columns ({{ columns|length }}):</strong>
+                <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px;">
+                    {% for col in columns %}
+                    <span style="padding: 4px 8px; background: rgba(255,255,255,0.05); border-radius: 4px; font-size: 12px; font-family: monospace; color: var(--muted);">
+                        {{ col.COLUMN_NAME }} <span style="color: var(--accent);">({{ col.DATA_TYPE }})</span>
+                    </span>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+            
+            {% if table_data %}
+            <div style="overflow-x: auto;">
+                <table style="width: 100%; border-collapse: collapse; background: rgba(255,255,255,0.01); border-radius: 8px; overflow: hidden;">
+                    <thead>
+                        <tr style="background: rgba(255,255,255,0.05); border-bottom: 2px solid var(--border);">
+                            {% for col in columns %}
+                            <th style="padding: 12px; text-align: left; font-weight: 600; font-size: 13px; color: var(--text);">
+                                {{ col.COLUMN_NAME }}
+                            </th>
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in table_data %}
+                        <tr style="border-bottom: 1px solid var(--border); transition: background 0.2s;" 
+                            onmouseover="this.style.background='rgba(255,255,255,0.03)'" 
+                            onmouseout="this.style.background='transparent'">
+                            {% for col in columns %}
+                            <td style="padding: 12px; font-size: 13px; color: var(--muted); max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                {% if row[col.COLUMN_NAME] is none %}
+                                    <span style="color: var(--muted); font-style: italic;">NULL</span>
+                                {% elif row[col.COLUMN_NAME] == True %}
+                                    <span style="color: var(--accent);">TRUE</span>
+                                {% elif row[col.COLUMN_NAME] == False %}
+                                    <span style="color: #fb7185;">FALSE</span>
+                                {% else %}
+                                    <span title="{{ row[col.COLUMN_NAME]|string|truncate(200) }}">
+                                        {{ row[col.COLUMN_NAME]|string|truncate(50) }}
+                                    </span>
+                                {% endif %}
+                            </td>
+                            {% endfor %}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- Pagination -->
+            {% if total_pages > 1 %}
+            <div style="display: flex; justify-content: center; align-items: center; gap: 12px; margin-top: 20px;">
+                {% if page > 1 %}
+                <a href="{{ url_for('admin_view_tables', table=selected_table, page=page-1) }}" class="ghost-btn">← Previous</a>
+                {% endif %}
+                
+                <span style="color: var(--muted);">
+                    Page {{ page }} of {{ total_pages }}
+                </span>
+                
+                {% if page < total_pages %}
+                <a href="{{ url_for('admin_view_tables', table=selected_table, page=page+1) }}" class="ghost-btn">Next →</a>
+                {% endif %}
+            </div>
+            {% endif %}
+            {% else %}
+            <div style="padding: 40px; text-align: center; color: var(--muted);">
+                <p>No data found in this table.</p>
+            </div>
+            {% endif %}
+        </div>
+        {% else %}
+        <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 12px; padding: 40px; text-align: center;">
+            <p style="color: var(--muted); margin: 0;">Select a table from the sidebar to view its contents.</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+{% endblock %}
+
